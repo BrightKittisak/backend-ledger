@@ -3,16 +3,27 @@ const express = require('express');
 const { authenticateAccessToken } = require('../auth/auth.middleware');
 const { validateRequest } = require('../../shared/middleware/validate-request');
 const {
+  getAccountLookupController,
   getMyPrimaryAccountController,
   getOwnedAccountController,
 } = require('./account.controller');
-const { publicAccountIdParamsSchema } = require('./account.schemas');
+const {
+  accountLookupQuerySchema,
+  publicAccountIdParamsSchema,
+} = require('./account.schemas');
+const { lookupRateLimit } = require('./lookup.rate-limit');
 
 const accountRouter = express.Router();
 
 accountRouter.use(authenticateAccessToken);
 
 accountRouter.get('/me', getMyPrimaryAccountController);
+accountRouter.get(
+  '/lookup',
+  lookupRateLimit,
+  validateRequest({ query: accountLookupQuerySchema }),
+  getAccountLookupController,
+);
 accountRouter.get(
   '/:publicAccountId',
   validateRequest({ params: publicAccountIdParamsSchema }),

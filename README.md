@@ -4,12 +4,14 @@ A portfolio-ready backend ledger project built with Node.js, Express, and MongoD
 
 ## Current milestone
 
-This repo is currently on **Slice 1** of the V1 roadmap:
+This repo is currently on **Slice 2** of the V1 roadmap:
 
 - foundation and shared architecture
 - auth/session lifecycle
 - primary account creation on registration
 - account summary endpoints
+- account lookup by account number
+- idempotent transfer flow
 - bootstrap and demo seed scripts
 - health and readiness checks
 - lint, test, CI, and initial Swagger support
@@ -75,6 +77,8 @@ Demo users:
 - `PATCH /api/v1/auth/password`
 - `GET /api/v1/accounts/me`
 - `GET /api/v1/accounts/:publicAccountId`
+- `GET /api/v1/accounts/lookup?accountNumber=...`
+- `POST /api/v1/transfers`
 
 Swagger UI is available at `/api-docs`.
 
@@ -84,6 +88,9 @@ Swagger UI is available at `/api-docs`.
 - Shared cross-cutting code lives under `src/shared`.
 - Business features live under `src/features`.
 - User registration is atomic: user, primary account, and refresh session are created in one MongoDB transaction.
+- Transfers are idempotent per user through the `Idempotency-Key` header.
+- Transfer recipient confirmation happens through account lookup before submit, but the transfer endpoint still re-validates all business rules.
+- User balances are protected with atomic debit against `availableBalanceMinor`, while ledger entries remain the read-side source of truth.
 - Access tokens are short-lived bearer tokens.
 - Refresh tokens are stored as hashed session records and delivered in `httpOnly` cookies.
 - Email is optional at runtime; if email config is incomplete, the app still runs and `/ready` reports email as disabled.

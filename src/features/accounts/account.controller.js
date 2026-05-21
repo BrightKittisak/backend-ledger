@@ -1,5 +1,6 @@
 const { sendSuccess } = require('../../shared/http/responses');
 const {
+  getAccountLookupForUser,
   getOwnedAccountSummaryByPublicId,
   getPrimaryAccountSummaryForUser,
 } = require('./account.service');
@@ -23,7 +24,19 @@ async function getOwnedAccountController(req, res) {
   });
 }
 
+async function getAccountLookupController(req, res) {
+  const lookupResult = await getAccountLookupForUser({
+    accountNumber: req.validated.query.accountNumber,
+    requesterUser: req.authUser,
+  });
+
+  return sendSuccess(res, {
+    data: lookupResult,
+  });
+}
+
 module.exports = {
+  getAccountLookupController,
   getMyPrimaryAccountController,
   getOwnedAccountController,
 };

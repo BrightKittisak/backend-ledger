@@ -22,6 +22,10 @@ const rawEnvSchema = z.object({
   CORS_ORIGINS: z.string().default('http://localhost:3000'),
   RATE_LIMIT_AUTH_WINDOW_MS: z.coerce.number().int().positive().default(60000),
   RATE_LIMIT_AUTH_MAX: z.coerce.number().int().positive().default(10),
+  RATE_LIMIT_LOOKUP_WINDOW_MS: z.coerce.number().int().positive().default(60000),
+  RATE_LIMIT_LOOKUP_MAX: z.coerce.number().int().positive().default(30),
+  RATE_LIMIT_MONEY_WINDOW_MS: z.coerce.number().int().positive().default(60000),
+  RATE_LIMIT_MONEY_MAX: z.coerce.number().int().positive().default(20),
   SYSTEM_USER_EMAIL: z.string().email(),
   SYSTEM_USER_PASSWORD: passwordSchema,
   SYSTEM_USER_NAME: z.string().trim().min(1).default('Backend Ledger System'),
@@ -64,6 +68,14 @@ const config = {
     auth: {
       max: parsedEnv.RATE_LIMIT_AUTH_MAX,
       windowMs: parsedEnv.RATE_LIMIT_AUTH_WINDOW_MS,
+    },
+    lookup: {
+      max: parsedEnv.RATE_LIMIT_LOOKUP_MAX,
+      windowMs: parsedEnv.RATE_LIMIT_LOOKUP_WINDOW_MS,
+    },
+    money: {
+      max: parsedEnv.RATE_LIMIT_MONEY_MAX,
+      windowMs: parsedEnv.RATE_LIMIT_MONEY_WINDOW_MS,
     },
   },
   refreshTokenSecret: parsedEnv.REFRESH_TOKEN_SECRET,
