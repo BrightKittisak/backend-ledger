@@ -1,14 +1,21 @@
-require("dotenv").config();
-
-const app = require("./src/app");
-const connectToDB = require("./src/config/db");
+const { config } = require("./src/shared/config/env");
+const { createApp } = require("./src/app");
+const { connectToDatabase } = require("./src/shared/db/connect-to-database");
+const { logger } = require("./src/shared/logger/logger");
+const { assertBootstrapReady } = require("./src/features/system/bootstrap.service");
 
 async function startServer() {
-  await connectToDB();
+  await connectToDatabase(config.mongoUri);
+  await assertBootstrapReady();
 
-  app.listen(3000, () => {
-    console.log("Server is running on port 3000");
+  const app = createApp();
+
+  app.listen(config.port, () => {
+    logger.info({ port: config.port }, "HTTP server started");
   });
 }
 
-startServer();
+startServer().catch((error) => {
+  logger.fatal({ err: error }, "Unable to start server");
+  process.exit(1);
+});
