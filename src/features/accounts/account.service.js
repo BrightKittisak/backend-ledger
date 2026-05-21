@@ -143,6 +143,29 @@ async function getPrimaryAccountSummaryForUser(userId) {
   return mapAccountToSummary(account);
 }
 
+async function getOwnedAccountByPublicId({ publicAccountId, session, userId }) {
+  let query = AccountModel.findOne({
+    publicAccountId,
+    userId,
+  });
+
+  if (session) {
+    query = query.session(session);
+  }
+
+  const account = await query;
+
+  if (!account) {
+    throw new AppError({
+      code: ERROR_CODES.ACCOUNT_NOT_FOUND,
+      message: 'Account not found',
+      statusCode: 404,
+    });
+  }
+
+  return account;
+}
+
 async function findAccountWithUserByAccountNumber(accountNumber, session) {
   let query = AccountModel.findOne({ accountNumber }).populate({
     model: UserModel,
@@ -309,19 +332,10 @@ async function resolveDepositTargetByAccountNumber({ accountNumber, session }) {
 }
 
 async function getOwnedAccountSummaryByPublicId({ publicAccountId, userId }) {
-  const account = await AccountModel.findOne({
+  const account = await getOwnedAccountByPublicId({
     publicAccountId,
     userId,
   });
-
-  if (!account) {
-    throw new AppError({
-      code: ERROR_CODES.ACCOUNT_NOT_FOUND,
-      message: 'Account not found',
-      statusCode: 404,
-    });
-  }
-
   return mapAccountToSummary(account);
 }
 
@@ -330,6 +344,7 @@ module.exports = {
   findAccountWithUserByAccountNumber,
   getAccountLookupForUser,
   getLedgerBalanceForAccount,
+  getOwnedAccountByPublicId,
   getOwnedAccountSummaryByPublicId,
   getPrimaryAccountForUser,
   getPrimaryAccountSummaryForUser,
