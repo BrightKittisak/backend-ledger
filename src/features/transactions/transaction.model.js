@@ -75,6 +75,10 @@ const transactionSchema = new mongoose.Schema(
   },
 );
 
+transactionSchema.index({ createdAt: -1 });
+transactionSchema.index({ fromAccountId: 1, createdAt: -1 });
+transactionSchema.index({ toAccountId: 1, createdAt: -1 });
+
 const TransactionModel =
   mongoose.models.Transaction || mongoose.model('Transaction', transactionSchema);
 

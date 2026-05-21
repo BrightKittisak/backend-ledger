@@ -9,6 +9,7 @@ const { authRouter } = require('./features/auth/auth.routes');
 const { depositRouter } = require('./features/deposits/deposit.routes');
 const { healthRouter, readinessRouter } = require('./features/health/health.routes');
 const { transferRouter } = require('./features/transfers/transfer.routes');
+const { transactionRouter } = require('./features/transactions/transaction.routes');
 const { withdrawalRouter } = require('./features/withdrawals/withdrawal.routes');
 const { config } = require('./shared/config/env');
 const { errorHandler } = require('./shared/middleware/error-handler');
@@ -45,6 +46,7 @@ function createApp() {
   app.use('/api/v1/accounts', accountRouter);
   app.use('/api/v1/deposits', depositRouter);
   app.use('/api/v1/transfers', transferRouter);
+  app.use('/api/v1/transactions', transactionRouter);
   app.use('/api/v1/withdrawals', withdrawalRouter);
   app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(openApiSpec));
 

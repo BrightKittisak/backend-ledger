@@ -4,7 +4,7 @@ A portfolio-ready backend ledger project built with Node.js, Express, and MongoD
 
 ## Current milestone
 
-This repo is currently on **Slice 3** of the V1 roadmap:
+This repo is currently on **Slice 4** of the V1 roadmap:
 
 - foundation and shared architecture
 - auth/session lifecycle
@@ -14,6 +14,8 @@ This repo is currently on **Slice 3** of the V1 roadmap:
 - idempotent transfer flow
 - system-only deposit flow
 - owner-only withdraw flow
+- account-scoped transaction history
+- transaction detail by public transaction id
 - bootstrap and demo seed scripts
 - health and readiness checks
 - lint, test, CI, and initial Swagger support
@@ -67,7 +69,7 @@ Demo users:
 - `bob.demo@backend-ledger.local` / `DemoPass123`
 - `charlie.demo@backend-ledger.local` / `DemoPass123`
 
-## Available endpoints in Slice 3
+## Available endpoints in Slice 4
 
 - `GET /health`
 - `GET /ready`
@@ -79,9 +81,11 @@ Demo users:
 - `PATCH /api/v1/auth/password`
 - `GET /api/v1/accounts/me`
 - `GET /api/v1/accounts/:publicAccountId`
+- `GET /api/v1/accounts/:publicAccountId/transactions`
 - `GET /api/v1/accounts/lookup?accountNumber=...`
 - `POST /api/v1/deposits`
 - `POST /api/v1/transfers`
+- `GET /api/v1/transactions/:publicTransactionId`
 - `POST /api/v1/withdrawals`
 
 Swagger UI is available at `/api-docs`.
@@ -97,6 +101,8 @@ Swagger UI is available at `/api-docs`.
 - Transfer recipient confirmation happens through account lookup before submit, but the transfer endpoint still re-validates all business rules.
 - Deposits are restricted to the `SYSTEM` role and can fund inactive user accounts for internal/demo use cases.
 - Withdrawals debit the authenticated user's primary account and credit the internal system account.
+- Transaction history is account-scoped, paginated, newest-first, and supports date/type filters.
+- Transaction detail is returned from the current viewer's perspective and hidden with `404` if the user is unrelated to the transaction.
 - User balances are protected with atomic debit against `availableBalanceMinor`, while ledger entries remain the read-side source of truth.
 - Access tokens are short-lived bearer tokens.
 - Refresh tokens are stored as hashed session records and delivered in `httpOnly` cookies.
