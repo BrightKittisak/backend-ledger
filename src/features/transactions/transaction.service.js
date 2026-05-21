@@ -1,19 +1,21 @@
 const { generatePublicId } = require('../../shared/utils/public-ids');
-const { maskFullName } = require('../../shared/utils/mask');
 const { TransactionModel } = require('./transaction.model');
-const { mapTransferTransactionToView } = require('./transaction.mapper');
+const { mapTransactionToView } = require('./transaction.mapper');
 
-async function createTransferTransaction({
+async function createTransactionRecord({
   amountMinor,
   createdAt,
   currency,
   fromAccount,
   fromAccountBalanceAfterMinor,
+  fromMaskedNameSnapshot,
   initiatedByUser,
   metadata,
   session,
   toAccount,
   toAccountBalanceAfterMinor,
+  toMaskedNameSnapshot,
+  type,
 }) {
   const [transaction] = await TransactionModel.create(
     [
@@ -24,7 +26,7 @@ async function createTransferTransaction({
         fromAccountBalanceAfterMinor,
         fromAccountId: fromAccount._id,
         fromAccountNumberSnapshot: fromAccount.accountNumber,
-        fromMaskedNameSnapshot: maskFullName(initiatedByUser.name),
+        fromMaskedNameSnapshot,
         initiatedByRole: initiatedByUser.role,
         initiatedByUserId: initiatedByUser._id,
         metadata,
@@ -32,8 +34,8 @@ async function createTransferTransaction({
         toAccountBalanceAfterMinor,
         toAccountId: toAccount._id,
         toAccountNumberSnapshot: toAccount.accountNumber,
-        toMaskedNameSnapshot: maskFullName(toAccount.userId.name),
-        type: 'TRANSFER',
+        toMaskedNameSnapshot,
+        type,
       },
     ],
     { session },
@@ -42,25 +44,57 @@ async function createTransferTransaction({
   return transaction;
 }
 
+async function createTransferTransaction({
+  amountMinor,
+  createdAt,
+  currency,
+  fromAccount,
+  fromAccountBalanceAfterMinor,
+  fromMaskedNameSnapshot,
+  initiatedByUser,
+  metadata,
+  session,
+  toAccount,
+  toAccountBalanceAfterMinor,
+  toMaskedNameSnapshot,
+}) {
+  return createTransactionRecord({
+    amountMinor,
+    createdAt,
+    currency,
+    fromAccount,
+    fromAccountBalanceAfterMinor,
+    fromMaskedNameSnapshot,
+    initiatedByUser,
+    metadata,
+    session,
+    toAccount,
+    toAccountBalanceAfterMinor,
+    toMaskedNameSnapshot,
+    type: 'TRANSFER',
+  });
+}
+
 async function getTransactionById(transactionId) {
   return TransactionModel.findById(transactionId);
 }
 
-async function getTransferTransactionView({ transactionId, viewerAccountId }) {
+async function getTransactionView({ transactionId, viewerAccountId }) {
   const transaction = await getTransactionById(transactionId);
 
   if (!transaction) {
     return null;
   }
 
-  return mapTransferTransactionToView({
+  return mapTransactionToView({
     transaction,
     viewerAccountId,
   });
 }
 
 module.exports = {
+  createTransactionRecord,
   createTransferTransaction,
+  getTransactionView,
   getTransactionById,
-  getTransferTransactionView,
 };

@@ -2,7 +2,7 @@ const { AccountModel } = require('../accounts/account.model');
 const {
   getLedgerBalanceForAccount,
   getPrimaryAccountForUser,
-  resolveTransferTargetByAccountNumber,
+  getSystemAccount,
 } = require('../accounts/account.service');
 const {
   acquireIdempotencyRecord,
@@ -11,39 +11,40 @@ const {
   markIdempotencyFailed,
 } = require('../idempotency/idempotency.service');
 const { LedgerEntryModel } = require('../ledger/ledger.model');
-const { sendTransferSuccessEmail } = require('../notifications/email.service');
+const { sendWithdrawalSuccessEmail } = require('../notifications/email.service');
 const {
-  createTransferTransaction,
+  createTransactionRecord,
   getTransactionView,
 } = require('../transactions/transaction.service');
+const { config } = require('../../shared/config/env');
 const { runInTransaction } = require('../../shared/db/mongoose-session');
 const { runWithTransactionRetries } = require('../../shared/db/transaction-retry');
 const { AppError } = require('../../shared/errors/app-error');
 const { ERROR_CODES } = require('../../shared/errors/error-codes');
 const { maskFullName } = require('../../shared/utils/mask');
 
-function normalizeTransferPayload({ amountMinor, metadata, toAccountNumber }) {
+function normalizeWithdrawalPayload({ amountMinor, metadata }) {
   return {
     amountMinor,
     metadata: {
-      note: metadata?.note ?? null,
+      bankAccountName: metadata.bankAccountName,
+      bankAccountNumber: metadata.bankAccountNumber,
+      bankName: metadata.bankName,
+      note: metadata.note ?? null,
     },
-    toAccountNumber,
-    type: 'TRANSFER',
+    type: 'WITHDRAW',
   };
 }
 
-async function createTransfer({
+async function createWithdrawal({
   amountMinor,
   idempotencyKey,
   initiatedByUser,
   metadata,
-  toAccountNumber,
 }) {
-  const normalizedPayload = normalizeTransferPayload({
+  const normalizedPayload = normalizeWithdrawalPayload({
     amountMinor,
     metadata,
-    toAccountNumber,
   });
 
   const idempotency = await acquireIdempotencyRecord({
@@ -67,7 +68,7 @@ async function createTransfer({
     };
   }
 
-  async function executeTransferTransaction() {
+  async function executeWithdrawalTransaction() {
     return runInTransaction(async (session) => {
       const sourceAccountInSession = await getPrimaryAccountForUser(initiatedByUser._id, session);
 
@@ -89,16 +90,12 @@ async function createTransfer({
         });
       }
 
-      const targetAccount = await resolveTransferTargetByAccountNumber({
-        accountNumber: toAccountNumber,
-        requesterAccount: sourceAccountInSession,
-        session,
-      });
+      const systemAccount = await getSystemAccount(session);
 
-      if (sourceAccountInSession.currency !== targetAccount.currency) {
+      if (sourceAccountInSession.currency !== systemAccount.currency) {
         throw new AppError({
-          code: ERROR_CODES.TRANSFER_SAME_CURRENCY_REQUIRED,
-          message: 'Transfer requires both accounts to use the same currency',
+          code: ERROR_CODES.CURRENCY_MISMATCH,
+          message: 'Withdrawal requires both accounts to use the same currency',
           statusCode: 409,
         });
       }
@@ -130,11 +127,8 @@ async function createTransfer({
         });
       }
 
-      const updatedTargetAccount = await AccountModel.findOneAndUpdate(
-        {
-          _id: targetAccount._id,
-          status: 'ACTIVE',
-        },
+      const updatedSystemAccount = await AccountModel.findByIdAndUpdate(
+        systemAccount._id,
         {
           $inc: {
             availableBalanceMinor: amountMinor,
@@ -146,15 +140,7 @@ async function createTransfer({
         },
       );
 
-      if (!updatedTargetAccount) {
-        throw new AppError({
-          code: ERROR_CODES.TRANSFER_DESTINATION_NOT_ACTIVE,
-          message: 'Transfer destination account is not active',
-          statusCode: 409,
-        });
-      }
-
-      const transaction = await createTransferTransaction({
+      const transaction = await createTransactionRecord({
         amountMinor,
         currency: sourceAccountInSession.currency,
         fromAccount: sourceAccountInSession,
@@ -162,12 +148,16 @@ async function createTransfer({
         fromMaskedNameSnapshot: maskFullName(initiatedByUser.name),
         initiatedByUser,
         metadata: {
-          note: metadata?.note ?? null,
+          bankAccountName: metadata.bankAccountName,
+          bankAccountNumber: metadata.bankAccountNumber,
+          bankName: metadata.bankName,
+          note: metadata.note ?? null,
         },
         session,
-        toAccount: targetAccount,
-        toAccountBalanceAfterMinor: updatedTargetAccount.availableBalanceMinor,
-        toMaskedNameSnapshot: maskFullName(targetAccount.userId.name),
+        toAccount: systemAccount,
+        toAccountBalanceAfterMinor: updatedSystemAccount.availableBalanceMinor,
+        toMaskedNameSnapshot: maskFullName(config.systemUser.name),
+        type: 'WITHDRAW',
       });
 
       await LedgerEntryModel.create(
@@ -179,7 +169,7 @@ async function createTransfer({
             transactionId: transaction._id,
           },
           {
-            accountId: targetAccount._id,
+            accountId: systemAccount._id,
             amountMinor,
             direction: 'CREDIT',
             transactionId: transaction._id,
@@ -199,19 +189,18 @@ async function createTransfer({
   }
 
   try {
-    const createdTransaction = await runWithTransactionRetries(executeTransferTransaction);
-
+    const createdTransaction = await runWithTransactionRetries(executeWithdrawalTransaction);
     const transactionView = await getTransactionView({
       transactionId: createdTransaction._id,
       viewerAccountId: sourceAccount._id,
     });
 
-    await sendTransferSuccessEmail({
+    await sendWithdrawalSuccessEmail({
       amountMinor,
+      bankAccountNumber: metadata.bankAccountNumber,
       currency: transactionView.currency,
       email: initiatedByUser.email,
       name: initiatedByUser.name,
-      toAccountNumber,
     });
 
     return {
@@ -230,5 +219,5 @@ async function createTransfer({
 }
 
 module.exports = {
-  createTransfer,
+  createWithdrawal,
 };

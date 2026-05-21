@@ -4,7 +4,7 @@ A portfolio-ready backend ledger project built with Node.js, Express, and MongoD
 
 ## Current milestone
 
-This repo is currently on **Slice 2** of the V1 roadmap:
+This repo is currently on **Slice 3** of the V1 roadmap:
 
 - foundation and shared architecture
 - auth/session lifecycle
@@ -12,6 +12,8 @@ This repo is currently on **Slice 2** of the V1 roadmap:
 - account summary endpoints
 - account lookup by account number
 - idempotent transfer flow
+- system-only deposit flow
+- owner-only withdraw flow
 - bootstrap and demo seed scripts
 - health and readiness checks
 - lint, test, CI, and initial Swagger support
@@ -65,7 +67,7 @@ Demo users:
 - `bob.demo@backend-ledger.local` / `DemoPass123`
 - `charlie.demo@backend-ledger.local` / `DemoPass123`
 
-## Available endpoints in Slice 1
+## Available endpoints in Slice 3
 
 - `GET /health`
 - `GET /ready`
@@ -78,7 +80,9 @@ Demo users:
 - `GET /api/v1/accounts/me`
 - `GET /api/v1/accounts/:publicAccountId`
 - `GET /api/v1/accounts/lookup?accountNumber=...`
+- `POST /api/v1/deposits`
 - `POST /api/v1/transfers`
+- `POST /api/v1/withdrawals`
 
 Swagger UI is available at `/api-docs`.
 
@@ -89,7 +93,10 @@ Swagger UI is available at `/api-docs`.
 - Business features live under `src/features`.
 - User registration is atomic: user, primary account, and refresh session are created in one MongoDB transaction.
 - Transfers are idempotent per user through the `Idempotency-Key` header.
+- Deposits and withdrawals use the same idempotency contract as transfers.
 - Transfer recipient confirmation happens through account lookup before submit, but the transfer endpoint still re-validates all business rules.
+- Deposits are restricted to the `SYSTEM` role and can fund inactive user accounts for internal/demo use cases.
+- Withdrawals debit the authenticated user's primary account and credit the internal system account.
 - User balances are protected with atomic debit against `availableBalanceMinor`, while ledger entries remain the read-side source of truth.
 - Access tokens are short-lived bearer tokens.
 - Refresh tokens are stored as hashed session records and delivered in `httpOnly` cookies.

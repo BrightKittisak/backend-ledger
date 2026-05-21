@@ -147,7 +147,7 @@ async function findAccountWithUserByAccountNumber(accountNumber, session) {
   let query = AccountModel.findOne({ accountNumber }).populate({
     model: UserModel,
     path: 'userId',
-    select: 'name role status',
+    select: 'email name role status',
   });
 
   if (session) {
@@ -254,6 +254,60 @@ async function resolveTransferTargetByAccountNumber({
   return targetAccount;
 }
 
+async function getSystemAccount(session) {
+  let systemUserQuery = UserModel.findOne({
+    email: config.systemUser.email,
+    role: 'SYSTEM',
+    status: 'ACTIVE',
+  });
+
+  if (session) {
+    systemUserQuery = systemUserQuery.session(session);
+  }
+
+  const systemUser = await systemUserQuery;
+
+  if (!systemUser) {
+    throw new AppError({
+      code: ERROR_CODES.SYSTEM_BOOTSTRAP_MISSING,
+      message: 'System bootstrap user is missing',
+      statusCode: 500,
+    });
+  }
+
+  let systemAccountQuery = AccountModel.findOne({ userId: systemUser._id });
+
+  if (session) {
+    systemAccountQuery = systemAccountQuery.session(session);
+  }
+
+  const systemAccount = await systemAccountQuery;
+
+  if (!systemAccount) {
+    throw new AppError({
+      code: ERROR_CODES.SYSTEM_BOOTSTRAP_MISSING,
+      message: 'System bootstrap account is missing',
+      statusCode: 500,
+    });
+  }
+
+  return systemAccount;
+}
+
+async function resolveDepositTargetByAccountNumber({ accountNumber, session }) {
+  const targetAccount = await findAccountWithUserByAccountNumber(accountNumber, session);
+
+  if (!targetAccount || targetAccount.userId.role === 'SYSTEM') {
+    throw new AppError({
+      code: ERROR_CODES.DEPOSIT_DESTINATION_NOT_FOUND,
+      message: 'Deposit destination account was not found',
+      statusCode: 404,
+    });
+  }
+
+  return targetAccount;
+}
+
 async function getOwnedAccountSummaryByPublicId({ publicAccountId, userId }) {
   const account = await AccountModel.findOne({
     publicAccountId,
@@ -279,6 +333,8 @@ module.exports = {
   getOwnedAccountSummaryByPublicId,
   getPrimaryAccountForUser,
   getPrimaryAccountSummaryForUser,
+  getSystemAccount,
   mapAccountToSummary,
+  resolveDepositTargetByAccountNumber,
   resolveTransferTargetByAccountNumber,
 };
