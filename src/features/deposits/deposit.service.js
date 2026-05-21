@@ -1,8 +1,8 @@
 const { AccountModel } = require('../accounts/account.model');
 const {
-  getLedgerBalanceForAccount,
+  getSystemAccount,
   getPrimaryAccountForUser,
-  resolveTransferTargetByAccountNumber,
+  resolveDepositTargetByAccountNumber,
 } = require('../accounts/account.service');
 const {
   acquireIdempotencyRecord,
@@ -11,9 +11,9 @@ const {
   markIdempotencyFailed,
 } = require('../idempotency/idempotency.service');
 const { LedgerEntryModel } = require('../ledger/ledger.model');
-const { sendTransferSuccessEmail } = require('../notifications/email.service');
+const { sendDepositSuccessEmail } = require('../notifications/email.service');
 const {
-  createTransferTransaction,
+  createTransactionRecord,
   getTransactionView,
 } = require('../transactions/transaction.service');
 const { runInTransaction } = require('../../shared/db/mongoose-session');
@@ -22,25 +22,33 @@ const { AppError } = require('../../shared/errors/app-error');
 const { ERROR_CODES } = require('../../shared/errors/error-codes');
 const { maskFullName } = require('../../shared/utils/mask');
 
-function normalizeTransferPayload({ amountMinor, metadata, toAccountNumber }) {
+function normalizeDepositPayload({ amountMinor, metadata, toAccountNumber }) {
   return {
     amountMinor,
     metadata: {
-      note: metadata?.note ?? null,
+      reason: metadata.reason,
     },
     toAccountNumber,
-    type: 'TRANSFER',
+    type: 'DEPOSIT',
   };
 }
 
-async function createTransfer({
+async function createDeposit({
   amountMinor,
   idempotencyKey,
   initiatedByUser,
   metadata,
   toAccountNumber,
 }) {
-  const normalizedPayload = normalizeTransferPayload({
+  if (initiatedByUser.role !== 'SYSTEM') {
+    throw new AppError({
+      code: ERROR_CODES.FORBIDDEN,
+      message: 'Only system users can create deposits',
+      statusCode: 403,
+    });
+  }
+
+  const normalizedPayload = normalizeDepositPayload({
     amountMinor,
     metadata,
     toAccountNumber,
@@ -52,12 +60,12 @@ async function createTransfer({
     userId: initiatedByUser._id,
   });
 
-  const sourceAccount = await getPrimaryAccountForUser(initiatedByUser._id);
+  const systemAccount = await getPrimaryAccountForUser(initiatedByUser._id);
 
   if (idempotency.mode === 'REPLAY') {
     const replayedTransaction = await getTransactionView({
       transactionId: idempotency.record.transactionId,
-      viewerAccountId: sourceAccount._id,
+      viewerAccountId: systemAccount._id,
     });
 
     return {
@@ -67,50 +75,24 @@ async function createTransfer({
     };
   }
 
-  async function executeTransferTransaction() {
+  async function executeDepositTransaction() {
     return runInTransaction(async (session) => {
-      const sourceAccountInSession = await getPrimaryAccountForUser(initiatedByUser._id, session);
-
-      if (sourceAccountInSession.status !== 'ACTIVE') {
-        throw new AppError({
-          code: ERROR_CODES.ACCOUNT_NOT_ACTIVE,
-          message: 'Source account is not active',
-          statusCode: 409,
-        });
-      }
-
-      const ledgerBalanceMinor = await getLedgerBalanceForAccount(sourceAccountInSession._id, session);
-
-      if (sourceAccountInSession.availableBalanceMinor !== ledgerBalanceMinor) {
-        throw new AppError({
-          code: ERROR_CODES.ACCOUNT_BALANCE_MISMATCH,
-          message: 'Source account balance is inconsistent',
-          statusCode: 409,
-        });
-      }
-
-      const targetAccount = await resolveTransferTargetByAccountNumber({
+      const systemAccountInSession = await getSystemAccount(session);
+      const targetAccount = await resolveDepositTargetByAccountNumber({
         accountNumber: toAccountNumber,
-        requesterAccount: sourceAccountInSession,
         session,
       });
 
-      if (sourceAccountInSession.currency !== targetAccount.currency) {
+      if (systemAccountInSession.currency !== targetAccount.currency) {
         throw new AppError({
-          code: ERROR_CODES.TRANSFER_SAME_CURRENCY_REQUIRED,
-          message: 'Transfer requires both accounts to use the same currency',
+          code: ERROR_CODES.CURRENCY_MISMATCH,
+          message: 'Deposit requires both accounts to use the same currency',
           statusCode: 409,
         });
       }
 
-      const updatedSourceAccount = await AccountModel.findOneAndUpdate(
-        {
-          _id: sourceAccountInSession._id,
-          availableBalanceMinor: {
-            $gte: amountMinor,
-          },
-          status: 'ACTIVE',
-        },
+      const updatedSystemAccount = await AccountModel.findByIdAndUpdate(
+        systemAccountInSession._id,
         {
           $inc: {
             availableBalanceMinor: -amountMinor,
@@ -122,19 +104,8 @@ async function createTransfer({
         },
       );
 
-      if (!updatedSourceAccount) {
-        throw new AppError({
-          code: ERROR_CODES.INSUFFICIENT_FUNDS,
-          message: 'Insufficient funds',
-          statusCode: 409,
-        });
-      }
-
-      const updatedTargetAccount = await AccountModel.findOneAndUpdate(
-        {
-          _id: targetAccount._id,
-          status: 'ACTIVE',
-        },
+      const updatedTargetAccount = await AccountModel.findByIdAndUpdate(
+        targetAccount._id,
         {
           $inc: {
             availableBalanceMinor: amountMinor,
@@ -146,34 +117,27 @@ async function createTransfer({
         },
       );
 
-      if (!updatedTargetAccount) {
-        throw new AppError({
-          code: ERROR_CODES.TRANSFER_DESTINATION_NOT_ACTIVE,
-          message: 'Transfer destination account is not active',
-          statusCode: 409,
-        });
-      }
-
-      const transaction = await createTransferTransaction({
+      const transaction = await createTransactionRecord({
         amountMinor,
-        currency: sourceAccountInSession.currency,
-        fromAccount: sourceAccountInSession,
-        fromAccountBalanceAfterMinor: updatedSourceAccount.availableBalanceMinor,
+        currency: systemAccountInSession.currency,
+        fromAccount: systemAccountInSession,
+        fromAccountBalanceAfterMinor: updatedSystemAccount.availableBalanceMinor,
         fromMaskedNameSnapshot: maskFullName(initiatedByUser.name),
         initiatedByUser,
         metadata: {
-          note: metadata?.note ?? null,
+          reason: metadata.reason,
         },
         session,
         toAccount: targetAccount,
         toAccountBalanceAfterMinor: updatedTargetAccount.availableBalanceMinor,
         toMaskedNameSnapshot: maskFullName(targetAccount.userId.name),
+        type: 'DEPOSIT',
       });
 
       await LedgerEntryModel.create(
         [
           {
-            accountId: sourceAccountInSession._id,
+            accountId: systemAccountInSession._id,
             amountMinor,
             direction: 'DEBIT',
             transactionId: transaction._id,
@@ -194,24 +158,26 @@ async function createTransfer({
         transactionId: transaction._id,
       });
 
-      return transaction;
+      return {
+        targetAccount,
+        transaction,
+      };
     });
   }
 
   try {
-    const createdTransaction = await runWithTransactionRetries(executeTransferTransaction);
-
+    const created = await runWithTransactionRetries(executeDepositTransaction);
     const transactionView = await getTransactionView({
-      transactionId: createdTransaction._id,
-      viewerAccountId: sourceAccount._id,
+      transactionId: created.transaction._id,
+      viewerAccountId: systemAccount._id,
     });
 
-    await sendTransferSuccessEmail({
+    await sendDepositSuccessEmail({
       amountMinor,
       currency: transactionView.currency,
-      email: initiatedByUser.email,
-      name: initiatedByUser.name,
-      toAccountNumber,
+      email: created.targetAccount.userId.email,
+      name: created.targetAccount.userId.name,
+      reason: metadata.reason,
     });
 
     return {
@@ -230,5 +196,5 @@ async function createTransfer({
 }
 
 module.exports = {
-  createTransfer,
+  createDeposit,
 };

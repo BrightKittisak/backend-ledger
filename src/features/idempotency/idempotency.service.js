@@ -7,7 +7,7 @@ const { IdempotencyRecordModel } = require('./idempotency.model');
 const TTL_HOURS = 24;
 const STALE_TIMEOUT_MS = 60 * 1000;
 
-function buildTransferRequestHash(payload) {
+function buildIdempotencyRequestHash(payload) {
   return hashValue(stableStringify(payload));
 }
 
@@ -142,7 +142,7 @@ async function markIdempotencyFailed({ error, recordId }) {
 
 module.exports = {
   acquireIdempotencyRecord,
-  buildTransferRequestHash,
+  buildIdempotencyRequestHash,
   markIdempotencyCompleted,
   markIdempotencyFailed,
 };

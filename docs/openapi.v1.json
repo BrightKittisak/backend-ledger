@@ -3,7 +3,7 @@
   "info": {
     "title": "Backend Ledger API",
     "version": "1.0.0",
-    "description": "Slice 1 public API surface for the Backend Ledger portfolio backend."
+    "description": "Slice 3 public API surface for the Backend Ledger portfolio backend."
   },
   "servers": [
     {
@@ -374,6 +374,109 @@
           },
           "409": {
             "description": "Idempotency conflict, in-progress request, insufficient funds, or transfer rule conflict"
+          }
+        }
+      }
+    },
+    "/api/v1/deposits": {
+      "post": {
+        "summary": "Create a deposit from the system account into a destination account",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["toAccountNumber", "amountMinor", "metadata"],
+                "properties": {
+                  "toAccountNumber": { "type": "string" },
+                  "amountMinor": { "type": "integer" },
+                  "metadata": {
+                    "type": "object",
+                    "required": ["reason"],
+                    "properties": {
+                      "reason": { "type": "string" }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Deposit created"
+          },
+          "200": {
+            "description": "Idempotent replay of an existing deposit"
+          },
+          "403": {
+            "description": "Only system users can create deposits"
+          },
+          "409": {
+            "description": "Idempotency conflict or currency mismatch"
+          }
+        }
+      }
+    },
+    "/api/v1/withdrawals": {
+      "post": {
+        "summary": "Create a withdrawal from the authenticated user's primary account",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["amountMinor", "metadata"],
+                "properties": {
+                  "amountMinor": { "type": "integer" },
+                  "metadata": {
+                    "type": "object",
+                    "required": ["bankName", "bankAccountName", "bankAccountNumber"],
+                    "properties": {
+                      "bankName": { "type": "string" },
+                      "bankAccountName": { "type": "string" },
+                      "bankAccountNumber": { "type": "string" },
+                      "note": { "type": "string" }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Withdrawal created"
+          },
+          "200": {
+            "description": "Idempotent replay of an existing withdrawal"
+          },
+          "409": {
+            "description": "Idempotency conflict, insufficient funds, inactive account, or currency mismatch"
           }
         }
       }
