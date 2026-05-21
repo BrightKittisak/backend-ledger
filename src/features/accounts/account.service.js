@@ -6,7 +6,16 @@ const { AppError } = require('../../shared/errors/app-error');
 const { ERROR_CODES } = require('../../shared/errors/error-codes');
 const { logger } = require('../../shared/logger/logger');
 const { generateAccountNumber } = require('../../shared/utils/account-number');
+const { maskFullName } = require('../../shared/utils/mask');
 const { generatePublicId } = require('../../shared/utils/public-ids');
+const { UserModel } = require('../users/user.model');
+
+const LOOKUP_REASON_MESSAGES = {
+  ACCOUNT_NOT_ACTIVE: 'This account exists but is not available for transfer',
+  NOT_FOUND: 'No transferable account was found for this account number',
+  OK: 'This account can receive transfers',
+  OWN_ACCOUNT: 'You cannot transfer to your own account',
+};
 
 async function generateUniqueAccountIdentity(session) {
   for (let attempt = 0; attempt < 10; attempt += 1) {
@@ -51,8 +60,8 @@ async function createPrimaryAccount({ session, userId }) {
   return account;
 }
 
-async function getLedgerBalanceForAccount(accountId) {
-  const [balanceDocument] = await LedgerEntryModel.aggregate([
+async function getLedgerBalanceForAccount(accountId, session) {
+  const aggregation = LedgerEntryModel.aggregate([
     { $match: { accountId } },
     {
       $group: {
@@ -79,6 +88,12 @@ async function getLedgerBalanceForAccount(accountId) {
     },
   ]);
 
+  if (session) {
+    aggregation.session(session);
+  }
+
+  const [balanceDocument] = await aggregation;
+
   return balanceDocument?.balance ?? 0;
 }
 
@@ -103,8 +118,14 @@ async function mapAccountToSummary(account) {
   });
 }
 
-async function getPrimaryAccountForUser(userId) {
-  const account = await AccountModel.findOne({ userId });
+async function getPrimaryAccountForUser(userId, session) {
+  let query = AccountModel.findOne({ userId });
+
+  if (session) {
+    query = query.session(session);
+  }
+
+  const account = await query;
 
   if (!account) {
     throw new AppError({
@@ -120,6 +141,117 @@ async function getPrimaryAccountForUser(userId) {
 async function getPrimaryAccountSummaryForUser(userId) {
   const account = await getPrimaryAccountForUser(userId);
   return mapAccountToSummary(account);
+}
+
+async function findAccountWithUserByAccountNumber(accountNumber, session) {
+  let query = AccountModel.findOne({ accountNumber }).populate({
+    model: UserModel,
+    path: 'userId',
+    select: 'name role status',
+  });
+
+  if (session) {
+    query = query.session(session);
+  }
+
+  return query.exec();
+}
+
+function buildLookupResponse({
+  accountNumber,
+  canTransfer,
+  isOwnAccount,
+  maskedAccountName = null,
+  reasonCode,
+}) {
+  return {
+    accountNumber,
+    canTransfer,
+    isOwnAccount,
+    maskedAccountName,
+    reason: {
+      code: reasonCode,
+      message: LOOKUP_REASON_MESSAGES[reasonCode],
+    },
+  };
+}
+
+async function getAccountLookupForUser({ accountNumber, requesterUser }) {
+  const requesterAccount = await getPrimaryAccountForUser(requesterUser._id);
+  const targetAccount = await findAccountWithUserByAccountNumber(accountNumber);
+
+  if (!targetAccount || targetAccount.userId.role === 'SYSTEM') {
+    return buildLookupResponse({
+      accountNumber,
+      canTransfer: false,
+      isOwnAccount: false,
+      reasonCode: 'NOT_FOUND',
+    });
+  }
+
+  const maskedAccountName = maskFullName(targetAccount.userId.name);
+
+  if (targetAccount._id.toString() === requesterAccount._id.toString()) {
+    return buildLookupResponse({
+      accountNumber,
+      canTransfer: false,
+      isOwnAccount: true,
+      maskedAccountName,
+      reasonCode: 'OWN_ACCOUNT',
+    });
+  }
+
+  if (targetAccount.status !== 'ACTIVE') {
+    return buildLookupResponse({
+      accountNumber,
+      canTransfer: false,
+      isOwnAccount: false,
+      maskedAccountName,
+      reasonCode: 'ACCOUNT_NOT_ACTIVE',
+    });
+  }
+
+  return buildLookupResponse({
+    accountNumber,
+    canTransfer: true,
+    isOwnAccount: false,
+    maskedAccountName,
+    reasonCode: 'OK',
+  });
+}
+
+async function resolveTransferTargetByAccountNumber({
+  accountNumber,
+  requesterAccount,
+  session,
+}) {
+  const targetAccount = await findAccountWithUserByAccountNumber(accountNumber, session);
+
+  if (!targetAccount || targetAccount.userId.role === 'SYSTEM') {
+    throw new AppError({
+      code: ERROR_CODES.TRANSFER_DESTINATION_NOT_FOUND,
+      message: 'Transfer destination account was not found',
+      statusCode: 404,
+    });
+  }
+
+  if (targetAccount._id.toString() === requesterAccount._id.toString()) {
+    throw new AppError({
+      code: ERROR_CODES.SELF_TRANSFER_FORBIDDEN,
+      message: 'Self transfer is not allowed',
+      statusCode: 409,
+    });
+  }
+
+  if (targetAccount.status !== 'ACTIVE') {
+    throw new AppError({
+      code: ERROR_CODES.TRANSFER_DESTINATION_NOT_ACTIVE,
+      message: 'Transfer destination account is not active',
+      statusCode: 409,
+    });
+  }
+
+  return targetAccount;
 }
 
 async function getOwnedAccountSummaryByPublicId({ publicAccountId, userId }) {
@@ -141,8 +273,12 @@ async function getOwnedAccountSummaryByPublicId({ publicAccountId, userId }) {
 
 module.exports = {
   createPrimaryAccount,
+  findAccountWithUserByAccountNumber,
+  getAccountLookupForUser,
+  getLedgerBalanceForAccount,
   getOwnedAccountSummaryByPublicId,
   getPrimaryAccountForUser,
   getPrimaryAccountSummaryForUser,
   mapAccountToSummary,
+  resolveTransferTargetByAccountNumber,
 };

@@ -305,6 +305,78 @@
           }
         }
       }
+    },
+    "/api/v1/accounts/lookup": {
+      "get": {
+        "summary": "Lookup a transfer recipient by account number",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          {
+            "in": "query",
+            "name": "accountNumber",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Lookup result"
+          },
+          "422": {
+            "description": "Invalid account number format"
+          }
+        }
+      }
+    },
+    "/api/v1/transfers": {
+      "post": {
+        "summary": "Transfer funds from the authenticated user's primary account",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["toAccountNumber", "amountMinor"],
+                "properties": {
+                  "toAccountNumber": { "type": "string" },
+                  "amountMinor": { "type": "integer" },
+                  "metadata": {
+                    "type": "object",
+                    "properties": {
+                      "note": { "type": "string" }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Transfer created"
+          },
+          "200": {
+            "description": "Idempotent replay of an existing transfer"
+          },
+          "409": {
+            "description": "Idempotency conflict, in-progress request, insufficient funds, or transfer rule conflict"
+          }
+        }
+      }
     }
   }
 }

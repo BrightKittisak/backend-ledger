@@ -7,6 +7,7 @@ const openApiSpec = require('../docs/openapi.v1.json');
 const { accountRouter } = require('./features/accounts/account.routes');
 const { authRouter } = require('./features/auth/auth.routes');
 const { healthRouter, readinessRouter } = require('./features/health/health.routes');
+const { transferRouter } = require('./features/transfers/transfer.routes');
 const { config } = require('./shared/config/env');
 const { errorHandler } = require('./shared/middleware/error-handler');
 const { notFoundHandler } = require('./shared/middleware/not-found-handler');
@@ -40,6 +41,7 @@ function createApp() {
   app.use('/ready', readinessRouter);
   app.use('/api/v1/auth', authRouter);
   app.use('/api/v1/accounts', accountRouter);
+  app.use('/api/v1/transfers', transferRouter);
   app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(openApiSpec));
 
   app.use(notFoundHandler);
