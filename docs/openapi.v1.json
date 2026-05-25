@@ -3,11 +3,42 @@
   "info": {
     "title": "Backend Ledger API",
     "version": "1.0.0",
-    "description": "Slice 4 public API surface for the Backend Ledger portfolio backend."
+    "description": "Slice 4 public API surface for the Backend Ledger portfolio backend. This API models a single primary account per user, idempotent money movement, and transaction history/detail views rendered from the current viewer perspective."
   },
   "servers": [
     {
-      "url": "http://localhost:3000"
+      "url": "http://localhost:3000",
+      "description": "Local development server"
+    }
+  ],
+  "tags": [
+    {
+      "name": "System",
+      "description": "Health and readiness endpoints"
+    },
+    {
+      "name": "Auth",
+      "description": "Authentication, session rotation, and current-user flows"
+    },
+    {
+      "name": "Accounts",
+      "description": "Primary account summary and account lookup"
+    },
+    {
+      "name": "Transfers",
+      "description": "User-initiated account-to-account transfers"
+    },
+    {
+      "name": "Deposits",
+      "description": "System-initiated funding flows"
+    },
+    {
+      "name": "Withdrawals",
+      "description": "User-initiated withdrawal flows"
+    },
+    {
+      "name": "Transactions",
+      "description": "Transaction history and transaction detail views"
     }
   ],
   "components": {
@@ -18,8 +49,113 @@
         "bearerFormat": "JWT"
       }
     },
+    "parameters": {
+      "XRequestIdHeader": {
+        "in": "header",
+        "name": "X-Request-Id",
+        "required": false,
+        "schema": {
+          "type": "string"
+        },
+        "description": "Optional client-supplied request correlation id. If omitted, the server generates one and returns it in the response header."
+      },
+      "IdempotencyKeyHeader": {
+        "in": "header",
+        "name": "Idempotency-Key",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "minLength": 1
+        },
+        "description": "Required for all money movement endpoints. Scoped to the authenticated user for 24 hours."
+      },
+      "CsrfHeader": {
+        "in": "header",
+        "name": "X-CSRF-Token",
+        "required": true,
+        "schema": {
+          "type": "string"
+        },
+        "description": "Required with the refresh cookie for refresh and logout flows."
+      },
+      "PublicAccountIdParam": {
+        "in": "path",
+        "name": "publicAccountId",
+        "required": true,
+        "schema": {
+          "type": "string"
+        }
+      },
+      "PublicTransactionIdParam": {
+        "in": "path",
+        "name": "publicTransactionId",
+        "required": true,
+        "schema": {
+          "type": "string"
+        }
+      },
+      "AccountNumberQuery": {
+        "in": "query",
+        "name": "accountNumber",
+        "required": true,
+        "schema": {
+          "type": "string",
+          "example": "1234567897"
+        }
+      },
+      "HistoryPageQuery": {
+        "in": "query",
+        "name": "page",
+        "required": false,
+        "schema": {
+          "type": "integer",
+          "default": 1,
+          "minimum": 1
+        }
+      },
+      "HistoryLimitQuery": {
+        "in": "query",
+        "name": "limit",
+        "required": false,
+        "schema": {
+          "type": "integer",
+          "default": 20,
+          "minimum": 1,
+          "maximum": 100
+        }
+      },
+      "HistoryTypeQuery": {
+        "in": "query",
+        "name": "type",
+        "required": false,
+        "schema": {
+          "type": "string",
+          "enum": ["DEPOSIT", "TRANSFER", "WITHDRAW"]
+        }
+      },
+      "HistoryFromQuery": {
+        "in": "query",
+        "name": "from",
+        "required": false,
+        "schema": {
+          "type": "string",
+          "format": "date-time",
+          "example": "2026-05-25T00:00:00.000Z"
+        }
+      },
+      "HistoryToQuery": {
+        "in": "query",
+        "name": "to",
+        "required": false,
+        "schema": {
+          "type": "string",
+          "format": "date-time",
+          "example": "2026-05-25T23:59:59.999Z"
+        }
+      }
+    },
     "schemas": {
-      "SuccessEnvelope": {
+      "SuccessEnvelopeEmpty": {
         "type": "object",
         "properties": {
           "success": {
@@ -27,12 +163,33 @@
             "example": true
           },
           "data": {
-            "type": "object"
+            "nullable": true,
+            "example": null
           },
           "meta": {
-            "type": "object"
+            "type": "object",
+            "example": {}
           }
-        }
+        },
+        "required": ["success", "data", "meta"]
+      },
+      "ErrorBody": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "example": "INSUFFICIENT_FUNDS"
+          },
+          "message": {
+            "type": "string",
+            "example": "Insufficient funds"
+          },
+          "details": {
+            "nullable": true,
+            "example": null
+          }
+        },
+        "required": ["code", "message", "details"]
       },
       "ErrorEnvelope": {
         "type": "object",
@@ -42,62 +199,132 @@
             "example": false
           },
           "error": {
-            "type": "object",
-            "properties": {
-              "code": {
-                "type": "string"
-              },
-              "message": {
-                "type": "string"
-              },
-              "details": {
-                "type": "object",
-                "nullable": true
-              }
-            }
+            "$ref": "#/components/schemas/ErrorBody"
           },
           "requestId": {
-            "type": "string"
+            "type": "string",
+            "example": "2bb3b8f1-6474-4d32-b1d2-a3c0ec0d6318"
           }
-        }
+        },
+        "required": ["success", "error", "requestId"]
+      },
+      "HealthResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "example": true
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "example": "ok"
+              }
+            },
+            "required": ["status"]
+          },
+          "meta": {
+            "type": "object",
+            "example": {}
+          }
+        },
+        "required": ["success", "data", "meta"]
+      },
+      "ReadinessResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "example": true
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "checks": {
+                "type": "object",
+                "properties": {
+                  "database": {
+                    "type": "string",
+                    "example": "up"
+                  },
+                  "email": {
+                    "type": "string",
+                    "example": "disabled"
+                  }
+                }
+              },
+              "status": {
+                "type": "string",
+                "example": "ready"
+              }
+            },
+            "required": ["checks", "status"]
+          },
+          "meta": {
+            "type": "object",
+            "example": {}
+          }
+        },
+        "required": ["success", "data", "meta"]
       },
       "UserProfile": {
         "type": "object",
         "properties": {
           "publicUserId": {
-            "type": "string"
+            "type": "string",
+            "example": "01HWXK7FQ8Y57G4JQPBJ6G7TSP"
           },
           "name": {
-            "type": "string"
+            "type": "string",
+            "example": "Alice Demo"
           },
           "email": {
-            "type": "string"
+            "type": "string",
+            "format": "email",
+            "example": "alice.demo@backend-ledger.local"
           },
           "role": {
             "type": "string",
-            "enum": ["USER", "SYSTEM"]
+            "enum": ["USER", "SYSTEM"],
+            "example": "USER"
           }
-        }
+        },
+        "required": ["publicUserId", "name", "email", "role"]
       },
-      "PrimaryAccount": {
+      "PrimaryAccountSummary": {
         "type": "object",
         "properties": {
           "publicAccountId": {
-            "type": "string"
+            "type": "string",
+            "example": "01HWXK7H30RFA1XANQ1ZW6FT9Y"
           },
           "accountNumber": {
-            "type": "string"
+            "type": "string",
+            "example": "1234567897"
           },
           "currency": {
-            "type": "string"
+            "type": "string",
+            "example": "THB"
           },
           "status": {
-            "type": "string"
+            "type": "string",
+            "enum": ["ACTIVE", "FROZEN", "CLOSED"],
+            "example": "ACTIVE"
           },
           "currentBalanceMinor": {
-            "type": "integer"
+            "type": "integer",
+            "example": 5000
           }
-        }
+        },
+        "required": [
+          "publicAccountId",
+          "accountNumber",
+          "currency",
+          "status",
+          "currentBalanceMinor"
+        ]
       },
       "AuthPayload": {
         "type": "object",
@@ -112,7 +339,505 @@
             "$ref": "#/components/schemas/UserProfile"
           },
           "primaryAccount": {
-            "$ref": "#/components/schemas/PrimaryAccount"
+            "$ref": "#/components/schemas/PrimaryAccountSummary"
+          }
+        },
+        "required": ["accessToken", "csrfToken", "user", "primaryAccount"]
+      },
+      "AuthEnvelope": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "example": true
+          },
+          "data": {
+            "$ref": "#/components/schemas/AuthPayload"
+          },
+          "meta": {
+            "type": "object",
+            "example": {}
+          }
+        },
+        "required": ["success", "data", "meta"]
+      },
+      "AuthMePayload": {
+        "type": "object",
+        "properties": {
+          "user": {
+            "$ref": "#/components/schemas/UserProfile"
+          },
+          "primaryAccount": {
+            "$ref": "#/components/schemas/PrimaryAccountSummary"
+          }
+        },
+        "required": ["user", "primaryAccount"]
+      },
+      "AuthMeEnvelope": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "example": true
+          },
+          "data": {
+            "$ref": "#/components/schemas/AuthMePayload"
+          },
+          "meta": {
+            "type": "object",
+            "example": {}
+          }
+        },
+        "required": ["success", "data", "meta"]
+      },
+      "AccountSummaryEnvelope": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "example": true
+          },
+          "data": {
+            "$ref": "#/components/schemas/PrimaryAccountSummary"
+          },
+          "meta": {
+            "type": "object",
+            "example": {}
+          }
+        },
+        "required": ["success", "data", "meta"]
+      },
+      "LookupReason": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "enum": ["OK", "OWN_ACCOUNT", "ACCOUNT_NOT_ACTIVE", "NOT_FOUND"],
+            "example": "OK"
+          },
+          "message": {
+            "type": "string",
+            "example": "This account can receive transfers"
+          }
+        },
+        "required": ["code", "message"]
+      },
+      "LookupResult": {
+        "type": "object",
+        "properties": {
+          "accountNumber": {
+            "type": "string",
+            "example": "1234567897"
+          },
+          "maskedAccountName": {
+            "type": "string",
+            "nullable": true,
+            "example": "A***e D**o"
+          },
+          "isOwnAccount": {
+            "type": "boolean",
+            "example": false
+          },
+          "canTransfer": {
+            "type": "boolean",
+            "example": true
+          },
+          "reason": {
+            "$ref": "#/components/schemas/LookupReason"
+          }
+        },
+        "required": [
+          "accountNumber",
+          "maskedAccountName",
+          "isOwnAccount",
+          "canTransfer",
+          "reason"
+        ]
+      },
+      "LookupEnvelope": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "example": true
+          },
+          "data": {
+            "$ref": "#/components/schemas/LookupResult"
+          },
+          "meta": {
+            "type": "object",
+            "example": {}
+          }
+        },
+        "required": ["success", "data", "meta"]
+      },
+      "TransactionCounterparty": {
+        "type": "object",
+        "properties": {
+          "accountNumber": {
+            "type": "string",
+            "nullable": true,
+            "example": "1234567897"
+          },
+          "displayName": {
+            "type": "string",
+            "example": "A***e D**o"
+          }
+        },
+        "required": ["accountNumber", "displayName"]
+      },
+      "TransactionInitiatedBy": {
+        "type": "object",
+        "properties": {
+          "role": {
+            "type": "string",
+            "enum": ["USER", "SYSTEM"],
+            "example": "USER"
+          }
+        },
+        "required": ["role"]
+      },
+      "TransactionMetadata": {
+        "type": "object",
+        "description": "Shape depends on transaction type. Transfer uses `note`, deposit uses `reason`, withdrawal uses bank details plus optional `note`.",
+        "properties": {
+          "note": {
+            "type": "string",
+            "nullable": true,
+            "example": "Lunch share"
+          },
+          "reason": {
+            "type": "string",
+            "nullable": true,
+            "example": "Initial funding"
+          },
+          "bankName": {
+            "type": "string",
+            "nullable": true,
+            "example": "KBank"
+          },
+          "bankAccountName": {
+            "type": "string",
+            "nullable": true,
+            "example": "Alice Demo"
+          },
+          "bankAccountNumber": {
+            "type": "string",
+            "nullable": true,
+            "example": "******7890"
+          }
+        }
+      },
+      "TransactionView": {
+        "type": "object",
+        "properties": {
+          "publicTransactionId": {
+            "type": "string",
+            "example": "01HWXK8Z2Q2X6P6S75S2E8C9TT"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["DEPOSIT", "TRANSFER", "WITHDRAW"],
+            "example": "TRANSFER"
+          },
+          "direction": {
+            "type": "string",
+            "enum": ["IN", "OUT"],
+            "example": "OUT"
+          },
+          "amountMinor": {
+            "type": "integer",
+            "example": 1200
+          },
+          "currency": {
+            "type": "string",
+            "example": "THB"
+          },
+          "balanceAfterMinor": {
+            "type": "integer",
+            "example": 3800
+          },
+          "counterparty": {
+            "$ref": "#/components/schemas/TransactionCounterparty"
+          },
+          "initiatedBy": {
+            "$ref": "#/components/schemas/TransactionInitiatedBy"
+          },
+          "metadata": {
+            "$ref": "#/components/schemas/TransactionMetadata"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2026-05-25T13:14:15.000Z"
+          }
+        },
+        "required": [
+          "publicTransactionId",
+          "type",
+          "direction",
+          "amountMinor",
+          "currency",
+          "balanceAfterMinor",
+          "counterparty",
+          "initiatedBy",
+          "metadata",
+          "createdAt"
+        ]
+      },
+      "MoneyOperationMeta": {
+        "type": "object",
+        "properties": {
+          "idempotency": {
+            "type": "object",
+            "properties": {
+              "replayed": {
+                "type": "boolean",
+                "example": false
+              }
+            },
+            "required": ["replayed"]
+          }
+        },
+        "required": ["idempotency"]
+      },
+      "MoneyOperationEnvelope": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "example": true
+          },
+          "data": {
+            "$ref": "#/components/schemas/TransactionView"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/MoneyOperationMeta"
+          }
+        },
+        "required": ["success", "data", "meta"]
+      },
+      "TransactionHistoryMeta": {
+        "type": "object",
+        "properties": {
+          "page": {
+            "type": "integer",
+            "example": 1
+          },
+          "limit": {
+            "type": "integer",
+            "example": 20
+          },
+          "totalItems": {
+            "type": "integer",
+            "example": 3
+          },
+          "totalPages": {
+            "type": "integer",
+            "example": 1
+          }
+        },
+        "required": ["page", "limit", "totalItems", "totalPages"]
+      },
+      "TransactionHistoryEnvelope": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "example": true
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TransactionView"
+            }
+          },
+          "meta": {
+            "$ref": "#/components/schemas/TransactionHistoryMeta"
+          }
+        },
+        "required": ["success", "data", "meta"]
+      },
+      "TransactionDetailEnvelope": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "example": true
+          },
+          "data": {
+            "$ref": "#/components/schemas/TransactionView"
+          },
+          "meta": {
+            "type": "object",
+            "example": {}
+          }
+        },
+        "required": ["success", "data", "meta"]
+      },
+      "RegisterRequest": {
+        "type": "object",
+        "required": ["email", "name", "password"],
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email"
+          },
+          "name": {
+            "type": "string",
+            "example": "Alice Demo"
+          },
+          "password": {
+            "type": "string",
+            "example": "Password123"
+          }
+        }
+      },
+      "LoginRequest": {
+        "type": "object",
+        "required": ["email", "password"],
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email"
+          },
+          "password": {
+            "type": "string",
+            "example": "Password123"
+          }
+        }
+      },
+      "ChangePasswordRequest": {
+        "type": "object",
+        "required": ["currentPassword", "newPassword"],
+        "properties": {
+          "currentPassword": {
+            "type": "string"
+          },
+          "newPassword": {
+            "type": "string",
+            "example": "NewPass123"
+          }
+        }
+      },
+      "TransferRequest": {
+        "type": "object",
+        "required": ["toAccountNumber", "amountMinor"],
+        "properties": {
+          "toAccountNumber": {
+            "type": "string",
+            "example": "1234567897"
+          },
+          "amountMinor": {
+            "type": "integer",
+            "example": 1200
+          },
+          "metadata": {
+            "type": "object",
+            "properties": {
+              "note": {
+                "type": "string",
+                "example": "Lunch share"
+              }
+            }
+          }
+        }
+      },
+      "DepositRequest": {
+        "type": "object",
+        "required": ["toAccountNumber", "amountMinor", "metadata"],
+        "properties": {
+          "toAccountNumber": {
+            "type": "string",
+            "example": "1234567897"
+          },
+          "amountMinor": {
+            "type": "integer",
+            "example": 5000
+          },
+          "metadata": {
+            "type": "object",
+            "required": ["reason"],
+            "properties": {
+              "reason": {
+                "type": "string",
+                "example": "Initial funding"
+              }
+            }
+          }
+        }
+      },
+      "WithdrawalRequest": {
+        "type": "object",
+        "required": ["amountMinor", "metadata"],
+        "properties": {
+          "amountMinor": {
+            "type": "integer",
+            "example": 700
+          },
+          "metadata": {
+            "type": "object",
+            "required": ["bankName", "bankAccountName", "bankAccountNumber"],
+            "properties": {
+              "bankName": {
+                "type": "string",
+                "example": "KBank"
+              },
+              "bankAccountName": {
+                "type": "string",
+                "example": "Alice Demo"
+              },
+              "bankAccountNumber": {
+                "type": "string",
+                "example": "1234567890"
+              },
+              "note": {
+                "type": "string",
+                "example": "Cash out"
+              }
+            }
+          }
+        }
+      }
+    },
+    "responses": {
+      "Unauthorized": {
+        "description": "Missing or invalid access token",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      },
+      "ValidationError": {
+        "description": "Request validation failed",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      },
+      "NotFound": {
+        "description": "Requested resource was not found",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
+          }
+        }
+      },
+      "Conflict": {
+        "description": "Business or idempotency conflict",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorEnvelope"
+            }
           }
         }
       }
@@ -121,297 +846,441 @@
   "paths": {
     "/health": {
       "get": {
+        "tags": ["System"],
         "summary": "Health check",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XRequestIdHeader"
+          }
+        ],
         "responses": {
           "200": {
-            "description": "Service is running"
+            "description": "Service is running",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
           }
         }
       }
     },
     "/ready": {
       "get": {
+        "tags": ["System"],
         "summary": "Readiness check",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XRequestIdHeader"
+          }
+        ],
         "responses": {
           "200": {
-            "description": "Service readiness status"
+            "description": "Service readiness state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReadinessResponse"
+                }
+              }
+            }
           }
         }
       }
     },
     "/api/v1/auth/register": {
       "post": {
-        "summary": "Register a new user",
+        "tags": ["Auth"],
+        "summary": "Register a new user and log them in immediately",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XRequestIdHeader"
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "required": ["email", "name", "password"],
-                "properties": {
-                  "email": { "type": "string" },
-                  "name": { "type": "string" },
-                  "password": { "type": "string" }
-                }
+                "$ref": "#/components/schemas/RegisterRequest"
               }
             }
           }
         },
         "responses": {
           "201": {
-            "description": "User registered",
+            "description": "User registered successfully",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SuccessEnvelope"
+                  "$ref": "#/components/schemas/AuthEnvelope"
                 }
               }
             }
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
           }
         }
       }
     },
     "/api/v1/auth/login": {
       "post": {
+        "tags": ["Auth"],
         "summary": "Login with email and password",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XRequestIdHeader"
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "required": ["email", "password"],
-                "properties": {
-                  "email": { "type": "string" },
-                  "password": { "type": "string" }
-                }
+                "$ref": "#/components/schemas/LoginRequest"
               }
             }
           }
         },
         "responses": {
           "200": {
-            "description": "Logged in"
+            "description": "Login successful",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
           }
         }
       }
     },
     "/api/v1/auth/refresh": {
       "post": {
-        "summary": "Rotate refresh session",
+        "tags": ["Auth"],
+        "summary": "Rotate refresh session and issue a new access token",
+        "description": "Requires the refresh token httpOnly cookie plus `X-CSRF-Token`.",
         "parameters": [
           {
-            "in": "header",
-            "name": "X-CSRF-Token",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
+            "$ref": "#/components/parameters/XRequestIdHeader"
+          },
+          {
+            "$ref": "#/components/parameters/CsrfHeader"
           }
         ],
         "responses": {
           "200": {
-            "description": "Session rotated"
+            "description": "Session rotated successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Conflict"
           }
         }
       }
     },
     "/api/v1/auth/logout": {
       "post": {
+        "tags": ["Auth"],
         "summary": "Logout current refresh session",
+        "description": "Requires the refresh token httpOnly cookie plus `X-CSRF-Token`.",
         "parameters": [
           {
-            "in": "header",
-            "name": "X-CSRF-Token",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
+            "$ref": "#/components/parameters/XRequestIdHeader"
+          },
+          {
+            "$ref": "#/components/parameters/CsrfHeader"
           }
         ],
         "responses": {
           "200": {
-            "description": "Logged out"
+            "description": "Session revoked successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelopeEmpty"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
           }
         }
       }
     },
     "/api/v1/auth/me": {
       "get": {
+        "tags": ["Auth"],
         "summary": "Get current user and primary account",
-        "security": [{ "bearerAuth": [] }],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XRequestIdHeader"
+          }
+        ],
         "responses": {
           "200": {
-            "description": "Auth state"
+            "description": "Current authenticated state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthMeEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
           }
         }
       }
     },
     "/api/v1/auth/password": {
       "patch": {
+        "tags": ["Auth"],
         "summary": "Change current user password",
-        "security": [{ "bearerAuth": [] }],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XRequestIdHeader"
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "required": ["currentPassword", "newPassword"],
-                "properties": {
-                  "currentPassword": { "type": "string" },
-                  "newPassword": { "type": "string" }
-                }
+                "$ref": "#/components/schemas/ChangePasswordRequest"
               }
             }
           }
         },
         "responses": {
           "200": {
-            "description": "Password changed"
+            "description": "Password changed and sessions revoked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelopeEmpty"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
           }
         }
       }
     },
     "/api/v1/accounts/me": {
       "get": {
-        "summary": "Get primary account summary",
-        "security": [{ "bearerAuth": [] }],
+        "tags": ["Accounts"],
+        "summary": "Get the authenticated user's primary account summary",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XRequestIdHeader"
+          }
+        ],
         "responses": {
           "200": {
-            "description": "Primary account summary"
+            "description": "Primary account summary",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountSummaryEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
           }
         }
       }
     },
     "/api/v1/accounts/{publicAccountId}": {
       "get": {
-        "summary": "Get owned account summary by public account id",
-        "security": [{ "bearerAuth": [] }],
+        "tags": ["Accounts"],
+        "summary": "Get an owned account summary by public account id",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "parameters": [
           {
-            "in": "path",
-            "name": "publicAccountId",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
+            "$ref": "#/components/parameters/XRequestIdHeader"
+          },
+          {
+            "$ref": "#/components/parameters/PublicAccountIdParam"
           }
         ],
         "responses": {
           "200": {
-            "description": "Owned account summary"
+            "description": "Owned account summary",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountSummaryEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
           }
         }
       }
     },
     "/api/v1/accounts/{publicAccountId}/transactions": {
       "get": {
-        "summary": "Get transaction history for an owned account",
-        "security": [{ "bearerAuth": [] }],
+        "tags": ["Transactions"],
+        "summary": "Get account-scoped transaction history",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "parameters": [
           {
-            "in": "path",
-            "name": "publicAccountId",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
+            "$ref": "#/components/parameters/XRequestIdHeader"
           },
           {
-            "in": "query",
-            "name": "page",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "default": 1
-            }
+            "$ref": "#/components/parameters/PublicAccountIdParam"
           },
           {
-            "in": "query",
-            "name": "limit",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "default": 20,
-              "maximum": 100
-            }
+            "$ref": "#/components/parameters/HistoryPageQuery"
           },
           {
-            "in": "query",
-            "name": "type",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "enum": ["DEPOSIT", "TRANSFER", "WITHDRAW"]
-            }
+            "$ref": "#/components/parameters/HistoryLimitQuery"
           },
           {
-            "in": "query",
-            "name": "from",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "format": "date-time"
-            }
+            "$ref": "#/components/parameters/HistoryTypeQuery"
           },
           {
-            "in": "query",
-            "name": "to",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "format": "date-time"
-            }
+            "$ref": "#/components/parameters/HistoryFromQuery"
+          },
+          {
+            "$ref": "#/components/parameters/HistoryToQuery"
           }
         ],
         "responses": {
           "200": {
-            "description": "Paginated transaction history"
+            "description": "Paginated transaction history in the account viewer perspective",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TransactionHistoryEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
           },
           "404": {
-            "description": "Account not found or not owned by the current user"
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
           }
         }
       }
     },
     "/api/v1/accounts/lookup": {
       "get": {
+        "tags": ["Accounts"],
         "summary": "Lookup a transfer recipient by account number",
-        "security": [{ "bearerAuth": [] }],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "parameters": [
           {
-            "in": "query",
-            "name": "accountNumber",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
+            "$ref": "#/components/parameters/XRequestIdHeader"
+          },
+          {
+            "$ref": "#/components/parameters/AccountNumberQuery"
           }
         ],
         "responses": {
           "200": {
-            "description": "Lookup result"
+            "description": "Lookup result with transferability semantics",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LookupEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
           },
           "422": {
-            "description": "Invalid account number format"
+            "$ref": "#/components/responses/ValidationError"
           }
         }
       }
     },
     "/api/v1/transfers": {
       "post": {
+        "tags": ["Transfers"],
         "summary": "Transfer funds from the authenticated user's primary account",
-        "security": [{ "bearerAuth": [] }],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "parameters": [
           {
-            "in": "header",
-            "name": "Idempotency-Key",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
+            "$ref": "#/components/parameters/XRequestIdHeader"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKeyHeader"
           }
         ],
         "requestBody": {
@@ -419,47 +1288,62 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "required": ["toAccountNumber", "amountMinor"],
-                "properties": {
-                  "toAccountNumber": { "type": "string" },
-                  "amountMinor": { "type": "integer" },
-                  "metadata": {
-                    "type": "object",
-                    "properties": {
-                      "note": { "type": "string" }
-                    }
-                  }
-                }
+                "$ref": "#/components/schemas/TransferRequest"
               }
             }
           }
         },
         "responses": {
           "201": {
-            "description": "Transfer created"
+            "description": "Transfer created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MoneyOperationEnvelope"
+                }
+              }
+            }
           },
           "200": {
-            "description": "Idempotent replay of an existing transfer"
+            "description": "Idempotent replay of an existing transfer",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MoneyOperationEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
           },
           "409": {
-            "description": "Idempotency conflict, in-progress request, insufficient funds, or transfer rule conflict"
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
           }
         }
       }
     },
     "/api/v1/deposits": {
       "post": {
-        "summary": "Create a deposit from the system account into a destination account",
-        "security": [{ "bearerAuth": [] }],
+        "tags": ["Deposits"],
+        "summary": "Create a system-initiated deposit",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "parameters": [
           {
-            "in": "header",
-            "name": "Idempotency-Key",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
+            "$ref": "#/components/parameters/XRequestIdHeader"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKeyHeader"
           }
         ],
         "requestBody": {
@@ -467,51 +1351,65 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "required": ["toAccountNumber", "amountMinor", "metadata"],
-                "properties": {
-                  "toAccountNumber": { "type": "string" },
-                  "amountMinor": { "type": "integer" },
-                  "metadata": {
-                    "type": "object",
-                    "required": ["reason"],
-                    "properties": {
-                      "reason": { "type": "string" }
-                    }
-                  }
-                }
+                "$ref": "#/components/schemas/DepositRequest"
               }
             }
           }
         },
         "responses": {
           "201": {
-            "description": "Deposit created"
+            "description": "Deposit created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MoneyOperationEnvelope"
+                }
+              }
+            }
           },
           "200": {
-            "description": "Idempotent replay of an existing deposit"
+            "description": "Idempotent replay of an existing deposit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MoneyOperationEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
-            "description": "Only system users can create deposits"
+            "$ref": "#/components/responses/Conflict"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
           },
           "409": {
-            "description": "Idempotency conflict or currency mismatch"
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
           }
         }
       }
     },
     "/api/v1/withdrawals": {
       "post": {
+        "tags": ["Withdrawals"],
         "summary": "Create a withdrawal from the authenticated user's primary account",
-        "security": [{ "bearerAuth": [] }],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "parameters": [
           {
-            "in": "header",
-            "name": "Idempotency-Key",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
+            "$ref": "#/components/parameters/XRequestIdHeader"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKeyHeader"
           }
         ],
         "requestBody": {
@@ -519,58 +1417,77 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "required": ["amountMinor", "metadata"],
-                "properties": {
-                  "amountMinor": { "type": "integer" },
-                  "metadata": {
-                    "type": "object",
-                    "required": ["bankName", "bankAccountName", "bankAccountNumber"],
-                    "properties": {
-                      "bankName": { "type": "string" },
-                      "bankAccountName": { "type": "string" },
-                      "bankAccountNumber": { "type": "string" },
-                      "note": { "type": "string" }
-                    }
-                  }
-                }
+                "$ref": "#/components/schemas/WithdrawalRequest"
               }
             }
           }
         },
         "responses": {
           "201": {
-            "description": "Withdrawal created"
+            "description": "Withdrawal created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MoneyOperationEnvelope"
+                }
+              }
+            }
           },
           "200": {
-            "description": "Idempotent replay of an existing withdrawal"
+            "description": "Idempotent replay of an existing withdrawal",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MoneyOperationEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
           },
           "409": {
-            "description": "Idempotency conflict, insufficient funds, inactive account, or currency mismatch"
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationError"
           }
         }
       }
     },
     "/api/v1/transactions/{publicTransactionId}": {
       "get": {
+        "tags": ["Transactions"],
         "summary": "Get a single transaction detail in the current viewer perspective",
-        "security": [{ "bearerAuth": [] }],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
         "parameters": [
           {
-            "in": "path",
-            "name": "publicTransactionId",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
+            "$ref": "#/components/parameters/XRequestIdHeader"
+          },
+          {
+            "$ref": "#/components/parameters/PublicTransactionIdParam"
           }
         ],
         "responses": {
           "200": {
-            "description": "Transaction detail"
+            "description": "Transaction detail for the current viewer account",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TransactionDetailEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
           },
           "404": {
-            "description": "Transaction not found or not visible to the current user"
+            "$ref": "#/components/responses/NotFound"
           }
         }
       }
